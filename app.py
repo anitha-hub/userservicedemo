@@ -58,11 +58,9 @@ def update_user(id):
     # validate the received values
     if name and email and mobileno and aadhaarno and address and request.method == 'PUT':
         # save edits
-        result= updateusers.update_one({'_id': ObjectId(id)}, {'$set': {'name': name, 'email':email, 'mobileno': mobileno,
+        updateusers.update_one({'_id': ObjectId(id)}, {'$set': {'name': name, 'email':email, 'mobileno': mobileno,
                                                                'aadhaarno': aadhaarno,'address': address}})
-        logger.debug('update result: {}'.format(result.raw_result))
         resp = jsonify('User updated successfully!')
-        resp.status_code = 200
         return resp
     else:
         return not_found()
