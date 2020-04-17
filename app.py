@@ -5,9 +5,6 @@ from flask import request
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
 
-#from flask.ext.pymongo import PyMongo
-
-
 app = Flask(__name__)
 app.config['MONGO_DBNAME'] = 'user_service'
 app.config['MONGO_URI'] = 'mongodb://localhost:27017/user_service'
