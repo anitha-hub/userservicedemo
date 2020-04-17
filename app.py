@@ -3,6 +3,8 @@ from flask import Flask
 from flask import jsonify
 from flask import request
 from flask_pymongo import PyMongo
+from bson.objectid import ObjectId
+
 #from flask.ext.pymongo import PyMongo
 
 
@@ -45,7 +47,7 @@ def add_user():
         return jsonify({'result': output})
 
 @app.route('/update/<id>', methods=['PUT'])
-def update_user():
+def update_user(id):
     updateusers = mongo.db.addusers
     name = request.json['name']
     email = request.json['email']
@@ -55,9 +57,10 @@ def update_user():
 
     # validate the received values
     if name and email and mobileno and aadhaarno and address and request.method == 'PUT':
-
         # save edits
-        updateusers.update_one({'id': ObjectId(_id)}, {'$set': {'name': name, 'email':email, 'mobileno': mobileno,'aadhaarno': aadhaarno,'address': address}})
+        result= updateusers.update_one({'_id': ObjectId(id)}, {'$set': {'name': name, 'email':email, 'mobileno': mobileno,
+                                                               'aadhaarno': aadhaarno,'address': address}})
+        logger.debug('update result: {}'.format(result.raw_result))
         resp = jsonify('User updated successfully!')
         resp.status_code = 200
         return resp
