@@ -4,6 +4,8 @@ from flask import jsonify
 from flask import request
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
+from bson.json_util import dumps
+
 
 app = Flask(__name__)
 app.config['MONGO_DBNAME'] = 'user_service'
@@ -69,6 +71,19 @@ def delete_user(id):
     resp = jsonify('User deleted successfully!')
     resp.status_code = 200
     return resp
+@app.route('/users', methods=['GET'])
+def users_list():
+    userlist = mongo.db.addusers
+    resp=userlist.find()
+    resp=dumps(resp)
+    return resp
+
+@app.route('/users/<name>', methods=['GET'])
+def userslist(name):
+    userlist = mongo.db.addusers
+    resp=userlist.find_one({'name':name})
+    resp=dumps(resp)
+    return resp
 
 # from flask import Flask
 # app = Flask(__name__)
@@ -79,4 +94,4 @@ def delete_user(id):
 #     return "Hello World!"
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="127.0.0.1",port=5001,debug=True)

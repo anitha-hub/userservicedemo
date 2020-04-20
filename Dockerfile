@@ -11,10 +11,9 @@ RUN mkdir /userservicedemo
 WORKDIR /userservicedemo
 COPY . /userservicedemo
 
-ENTRYPOINT [ "python" ]
+EXPOSE 5001
 
+ENTRYPOINT [ "python" ]
 CMD [ "app.py" ]
 
-RUN adduser -D user
-USER user
 
