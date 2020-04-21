@@ -85,6 +85,13 @@ def userslist(name):
     resp=dumps(resp)
     return resp
 
+@app.route('/oneuser/<id>', methods=['GET'])
+def user_based_id(id):
+    userlist = mongo.db.addusers
+    resp=userlist.find_one({'_id': ObjectId(id)})
+    resp=dumps(resp)
+    return resp
+
 # from flask import Flask
 # app = Flask(__name__)
 #
