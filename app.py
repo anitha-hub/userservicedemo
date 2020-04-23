@@ -5,20 +5,15 @@ from flask import request
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
 from bson.json_util import dumps
+from pymongo import MongoClient
 
 
 app = Flask(__name__)
-app.config['MONGO_DBNAME'] = 'user_service'
-app.config['MONGO_URI'] = 'mongodb://localhost:27017/user_service'
-mongo = PyMongo(app)
-
-# app.config['MONGODB_SETTINGS'] = {
-#     'host': 'mongodb://localhost/user_service',
-#     'connect': False,
-# }
-# db = MongoEngine(app)
-#
-# import mongoengine as  me
+# app.config['MONGO_DBNAME'] = 'user_service'
+# app.config['MONGO_URI'] = 'mongodb://localhost:27017/user_service'
+# mongo = PyMongo(app)
+client = MongoClient('mongodb://mongodb:27017/')
+mongo=client.user_service
 
 # class user(me.Document):
 #     # id = me.IntField(primary_key=True)
@@ -71,6 +66,7 @@ def delete_user(id):
     resp = jsonify('User deleted successfully!')
     resp.status_code = 200
     return resp
+
 @app.route('/users', methods=['GET'])
 def users_list():
     userlist = mongo.db.addusers
@@ -92,13 +88,5 @@ def user_based_id(id):
     resp=dumps(resp)
     return resp
 
-# from flask import Flask
-# app = Flask(__name__)
-#
-#
-# @app.route('/')
-# def hello():
-#     return "Hello World!"
-
 if __name__ == '__main__':
-    app.run(host="127.0.0.1",port=5001,debug=True)
+    app.run(host='0.0.0.0',port=5001,debug=True)

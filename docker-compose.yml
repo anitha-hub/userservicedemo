@@ -5,8 +5,15 @@ services:
     build:
       context: .
     ports:
-    - "8000:8000"
+    - "80:5000"
     volumes:
-    - ./userMservice:/userservice
-    command: >
-      sh -c "python manage.py runserver 0.0.0.0:8000"
+    - .app
+
+#  db:
+#    image: mongo:3.0.2
+  mongodb:
+    image: mongo:4.2.3
+    ports:
+      - '27017:27017'
+#    command: >
+#      sh -c "python manage.py runserver "
