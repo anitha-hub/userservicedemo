@@ -1,73 +1,69 @@
 from bson.objectid import ObjectId
 from bson.json_util import dumps
-from flask import Flask, abort, request, jsonify, g, url_for
+from flask import Flask, abort, request, jsonify, url_for, make_response
 from flask_mongoengine import MongoEngine
 from mongoengine import *
 from mongoengine import connect
 from mongoengine.connection import disconnect
-from flask_httpauth import HTTPBasicAuth
-from passlib.apps import custom_app_context as pwd_context
-from itsdangerous import (TimedJSONWebSignatureSerializer
-                          as Serializer, BadSignature, SignatureExpired)
+from werkzeug.security import generate_password_hash, check_password_hash
+import requests
+import uuid
+import jwt
+import datetime
+from functools import wraps
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'very secretpassword'
+app.config['SECRET_KEY'] = 'Th1s1ss3cr3t'
 app.config['MONGODB_DB'] = 'user_service'
 db = MongoEngine(app)
-connect('db',host='localhost', port=27017,alias='userauthdb')
-
-auth = HTTPBasicAuth()
+connect('db', host='localhost', port=27017, alias='userauthdb')
 
 
 class UserDetails(Document):
-
     username = StringField(index=True)
-    password_hash = StringField()
-    mobileno=IntField()
-    aadhaarno=IntField()
-    email=EmailField()
-    address=StringField()
+    password = StringField()
+    mobileno = IntField()
+    aadhaarno = IntField()
+    email = EmailField()
+    address = StringField()
+    public_id = StringField()
 
-    def hash_password(self, password):
-        self.password_hash = pwd_context.encrypt(password)
+    def to_json(self):
+        return {
+            "_id": str(self.pk),
+            "username": self.username,
+            "password": self.password,
+            "mobileno": self.mobileno,
+            "email": self.email,
+            "aadhaarno": self.aadhaarno,
+            "address": self.address,
+            "public_id": self.public_id
+        }
 
-    def verify_password(self, password):
-        return pwd_context.verify(password, self.password_hash)
-
-    def generate_auth_token(self, expiration=600):
-        s = Serializer(app.config['SECRET_KEY'], expires_in=expiration)
-        return s.dumps({'id': self.id})
-
-    @staticmethod
-    def verify_auth_token(token):
-        s = Serializer(app.config['SECRET_KEY'])
-        try:
-            data = s.loads(token)
-        except SignatureExpired:
-            return None  # valid token, but expired
-        except BadSignature:
-            return None  # invalid token
-        user = User.objects.get(data['id'])
-        return user
 
 disconnect(alias='userauthdb')
 
 
-@auth.verify_password
-def verify_password(username_or_token, password):
-    # first try to authenticate by token
-    user = User.verify_auth_token(username_or_token)
-    if not user:
-        # try to authenticate with username/password
-        user = User.objects.filter_by(username=username_or_token).first()
-        if not user or not user.verify_password(password):
-            return False
-    g.user = user
-    return True
+def token_required(f):
+    @wraps(f)
+    def decorator(*args, **kwargs):
+        token = None
+        # if 'x-access-tokens' in request.headers:
+        #     token = request.headers['x-access-tokens']
+        if 'X-Access-Token' in request.headers:
+            token = request.headers['X-Access-Token']
+        if not token:
+            return jsonify({'message': 'a valid token is missing'})
 
-@app.route('/adduser', methods=['POST'])
-def new_user():
-    userid=0
+        data=jwt.decode(token, app.config['SECRET_KEY'])
+        current_user = UserDetails.objects.filter(public_id=data['public_id']).first()
+        return f(current_user, *args, **kwargs)
+
+    return decorator
+
+
+@app.route('/register', methods=['POST'])
+def signup_user():
     username = request.json["username"]
     password = request.json['password']
     mobileno = request.json['mobileno']
@@ -78,105 +74,123 @@ def new_user():
 
         existinguser = UserDetails.objects.filter(username=username).count()
 
-        if existinguser==0:
-
-            user = UserDetails.objects.create(username=username,mobileno=mobileno, aadhaarno=aadhaarno,
-                                  email=email, address=address)
-            result=user.save(commit=False)
-            result.hash_password(password)
+        if existinguser == 0:
+            hashed_password = generate_password_hash(password, method='sha256')
+            user = UserDetails.objects.create(username=username, password=hashed_password, mobileno=mobileno,
+                                              aadhaarno=aadhaarno,
+                                              email=email, address=address, public_id=str(uuid.uuid4()))
+            result = user.save(commit=False)
             result.save()
-            userid=result._id
-            print(userid)
-        return (jsonify({'username': username,'mobileno': mobileno, 'aadhaarno': aadhaarno,
-              'email': email}), 201,
-            {'Location': url_for('get_user', id=userid, _external=True)})
+            return (jsonify({'username': username, 'mobileno': mobileno, 'aadhaarno': aadhaarno,
+                         'email': email, 'address': address, 'password': hashed_password},
+                        {'message': 'registered successfully'}), 201,
+                {'Location': url_for('login_user', _external=True)})
     else:
-            abort(400)  # missing arguments
+        abort(400)  # missing arguments
 
 
-@app.route('/users/<int:id>')
-def get_user(id):
-    user = User.objects.get(id)
-    if not user:
-        abort(400)
-    return jsonify({'username': user.username})
+@app.route('/login', methods=['GET', 'POST'])
+def login_user():
+    auth = request.authorization
+    # auth=requests.get("http://127.0.0.1:5000/login")
+    if not auth or not auth.username or not auth.password:
+        return make_response('could not verify', 401, {'WWW.Authentication': 'Basic realm: "login required"'})
 
-@app.route('/token')
-@auth.login_required
-def get_auth_token():
-    token = g.user.generate_auth_token(600)
-    return jsonify({'token': token.decode('ascii'), 'duration': 600})
+    user = UserDetails.objects.filter(username=auth.username).first()
+    if check_password_hash(user.password, auth.password):
+            token = jwt.encode(
+                {'public_id': user.public_id, 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)},
+                app.config['SECRET_KEY'])
+            return jsonify({'token': token.decode('UTF-8')})
+
+    return make_response('could not verify', 401, {'WWW.Authentication': 'Basic realm: "login required"'})
 
 
-@app.route('/api/resource')
-@auth.login_required
-def get_resource():
-    return jsonify({'data': 'Hello, %s!' % g.user.username})
-
-# @app.route('/adduser',methods=['POST'])
-# def add_user():
-#     addusers=mongo.db.addusers
-#     name = request.json['name']
-#     mobileno = request.json['mobileno']
-#     aadhaarno=request.json['aadhaarno']
-#     email = request.json['email']
-#     address = request.json['address']
-#
-#     if name and mobileno and aadhaarno and email and address and request.method=='POST':
-#         userinsert_id=addusers.insert({'name':name, 'mobileno':mobileno,'aadhaarno':aadhaarno,
-#                                    'email':email,'address':address})
-#         new_user = addusers.find_one({'_id': userinsert_id})
-#         output = {'name': new_user['name'], 'mobileno': new_user['mobileno'], 'aadhaarno': new_user['aadhaarno'],'email': new_user['email'],
-#                   'address': new_user['address']}
-#         return jsonify({'result': output})
-
-@app.route('/update/<id>', methods=['PUT'])
-@auth.login_required
-def update_user(id):
-    name = request.json['name']
+@app.route('/update', methods=['PUT'])
+@token_required
+def update_user(current_user):
+    username = request.json['username']
     email = request.json['email']
     mobileno = request.json['mobileno']
     aadhaarno = request.json['aadhaarno']
     address = request.json['address']
+    password=request.json['password']
 
     # validate the received values
-    if name and email and mobileno and aadhaarno and address and request.method == 'PUT':
+    if username and email and mobileno and aadhaarno and address and request.method == 'PUT':
         # save edits
-        User.objects.update_one({'_id': ObjectId(id)}, {'$set': {'name': name, 'email':email, 'mobileno': mobileno,
-                                                               'aadhaarno': aadhaarno,'address': address}})
+        UserDetails.objects.filter(id=current_user.id).update(username=username, email=email, mobileno =mobileno,aadhaarno=aadhaarno, address=address,password=password)
         resp = jsonify('User updated successfully!')
         return resp
     else:
         return not_found()
 
-@app.route('/delete/<id>', methods=['DELETE'])
-@auth.login_required
-def delete_user(id):
-    User.objects.delete_one({'_id': ObjectId(id)})
+@app.route('/oneuser', methods=['GET'])
+@token_required
+def get_user(current_user):
+    user = UserDetails.objects.filter(id=current_user.id)
+    if not user:
+        abort(400)
+    result = []
+    for u in user:
+        user_data = {}
+        user_data['username'] = u.username
+        user_data['mobileno'] = u.mobileno
+        user_data['email'] = u.email
+        user_data['aadhaarno'] = u.aadhaarno
+        user_data['address'] = u.address
+
+        result.append(user_data)
+
+    return jsonify({'user': result})
+
+@app.route('/userpublicid/<publicid>', methods=['GET'])
+def getuserpid(publicid):
+    user = UserDetails.objects.get(public_id=publicid)
+    return user.to_json()
+
+    # if not user:
+    #     abort(400)
+    # result = []
+    # for u in user:
+    #     user_data = {}
+    #     user_data['id'] =str(u.pk())
+    #     user_data['username'] = u.username
+    #     user_data['mobileno'] = u.mobileno
+    #     user_data['email'] = u.email
+    #     user_data['aadhaarno'] = u.aadhaarno
+    #     user_data['address'] = u.address
+    #
+    #     result.append(user_data)
+    #
+    # return jsonify({'user': result})
+
+@app.route('/users', methods=['GET'])
+def users_list():
+    resp = UserDetails.objects.all()
+    result = []
+    for u in resp:
+        user_data = {}
+
+        user_data['username'] = u.username
+        user_data['mobileno'] = u.mobileno
+        user_data['email'] = u.email
+        user_data['aadhaarno'] = u.aadhaarno
+        user_data['address'] = u.address
+
+        result.append(user_data)
+
+    return jsonify({'user': result})
+
+@app.route('/delete', methods=['DELETE'])
+@token_required
+def delete_user(current_user):
+    result=UserDetails.objects.get(id=current_user.id)
+    result.delete()
     resp = jsonify('User deleted successfully!')
     resp.status_code = 200
     return resp
 
-@app.route('/users', methods=['GET'])
-@auth.login_required
-def users_list():
-    resp=User.objects.find()
-    resp=dumps(resp)
-    return resp
-
-@app.route('/users/<name>', methods=['GET'])
-@auth.login_required
-def userslist(name):
-    resp=User.objects.find_one({'name':name})
-    resp=dumps(resp)
-    return resp
-
-@app.route('/oneuser/<id>', methods=['GET'])
-@auth.login_required
-def user_based_id(id):
-    resp=User.objects.find_one({'_id': ObjectId(id)})
-    resp=dumps(resp)
-    return resp
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0',port=5001,debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
